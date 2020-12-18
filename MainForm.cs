@@ -8,6 +8,7 @@ using System.Text;
 using System.Windows.Forms;
 using System.IO;
 using System.Collections;
+using static FileManager.Services.Services;
 
 namespace FileManager
 {
@@ -19,287 +20,143 @@ namespace FileManager
 
         private String CurrentListViewAdress { get; set; } = "";
 
+        private bool[] OrderSigns { get; set; } = new bool[4];
+
+        private List<String> FileBuffer { get; set; } = new List<String>();
+
+        private List<String> FolderBuffer { get; set; } = new List<String>();
+
+        private bool IsCutting { get; set; } = false;
+
         public MainForm()
         {
             InitializeComponent();
+            DirectoryContentListView.ContextMenuStrip = optionsContextMenuStrip;
             DirectoryContentListView.ColumnClick += new ColumnClickEventHandler(ClickOnColumn);
             DirectoryContentListView.Columns.Add(new ColumnHeader() { Text = "Имя", Width = 160 });
             DirectoryContentListView.Columns.Add(new ColumnHeader() { Text = "Размер", Width = 100 });
             DirectoryContentListView.Columns.Add(new ColumnHeader() { Text = "Тип", Width = 60 });
-            DirectoryContentListView.Columns.Add(new ColumnHeader() { Text = "Дата изменения", Width = 110 });
-            //заполнение TreeView узлами локальных дисков и заполнение дочерних узлов этих дисков
-            int n = 0;
-            foreach(String driveName in Environment.GetLogicalDrives())
-            {
-                FileCatalogTreeView.Nodes.Add(new TreeNode()
-                { Name = driveName, Text = "Logical drive " + driveName, ImageIndex = 2, SelectedImageIndex = 2 });
-                String[] subDirs;
-                try
-                {
-                    subDirs = Directory.GetDirectories(@driveName);
-                    foreach (String fullDirName in subDirs)
-                    {
-                        String shortDirName = fullDirName.Substring(fullDirName.LastIndexOf('\\') + 1);
-                        FileCatalogTreeView.Nodes[n].Nodes.Add(fullDirName, shortDirName, 0);
-                    }
-                }
-                catch (IOException)
-                {
-                    // Ignore non-working drive's content
-                }
-                n++;
-            }
+            DirectoryContentListView.Columns.Add(new ColumnHeader() { Text = "Дата изменения", Width = 115 });
+            CreateTreeViewRoot(FileCatalogTreeView);
         }
 
         private void FileCatalogTreeView_AfterSelect(object sender, TreeViewEventArgs e)
         {
-            if (VisitedAdresses.Count != 0)
+            if (VisitedAdresses.Count == 0)
             {
-                String lastAdress = VisitedAdresses[VisitedAdresses.Count - 1];
-                VisitedAdresses.Clear();
-                VisitedAdresses.Add(lastAdress);
-                CurrentAdressIndex = 0;
-                toolStripButton1.Enabled = true;
-            } else
+                toolStripBackButton.Enabled = false;
+            }
+            else
             {
-                toolStripButton1.Enabled = false;
-            }          
+                toolStripBackButton.Enabled = true;
+            }
+            if (CurrentAdressIndex < VisitedAdresses.Count - 1)
+            {
+                VisitedAdresses = VisitedAdresses.Take(CurrentAdressIndex + 1).ToList();
+            }
             VisitedAdresses.Add(e.Node.Name);
             CurrentAdressIndex++;
-            //проверка возможности перехода назад/вперёд
-            //if (currentAdressIndex + 1 == Adresses.Count)
-                toolStripButton2.Enabled = false;
-            //else    toolStripButton2.Enabled = true;
-            //if (currentAdressIndex - 1 == -1)
-            //    toolStripButton1.Enabled = false;
-            //else
-            //    toolStripButton1.Enabled = true;
+            toolStripForwardButton.Enabled = false;
             DirectoryContentListView.Items.Clear();
             CurrentListViewAdress = e.Node.Name;
-            toolStripTextBox1.Text = CurrentListViewAdress;
-            //заполнение ListView
+            toolStripAdressTextBox.Text = CurrentListViewAdress;
             try
             {
-                if (DirectoryContentListView.View != View.Tile)
-                {
-                    FileInfo f = new FileInfo(@e.Node.Name);
-                    string t = "";
-                    string[] str2 = Directory.GetDirectories(@e.Node.Name);
-                    ListViewItem lw;
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Папка";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                        lw.Name = s2;
-                        DirectoryContentListView.Items.Add(lw);
-                    }
-                    str2 = Directory.GetFiles(@e.Node.Name);
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Файл";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                        lw.Name = s2;
-                        DirectoryContentListView.Items.Add(lw);
-                    }
-                }
-                else
-                {
-                    FileInfo f = new FileInfo(@e.Node.Name);
-                    string t = "";
-                    string[] str2 = Directory.GetDirectories(@e.Node.Name);
-                    ListViewItem lw = new ListViewItem();
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 0);
-                        lw.Name = s2;
-                        DirectoryContentListView.Items.Add(lw);
-                    }
-                    str2 = Directory.GetFiles(@e.Node.Name);
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 1);
-                        lw.Name = s2;
-                        DirectoryContentListView.Items.Add(lw);
-                    }
-                }
+                FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
             }
-            catch (Exception er) {
-                int a = 2 + 2;
+            catch (IOException)
+            {
+                // Ignore unaccessible directories
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip not available directories
             }
         }
 
-        private void списокИконокToolStripMenuItem_Click(object sender, EventArgs e)
+        private void IconsListToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DirectoryContentListView.View = View.SmallIcon;
         }
 
-        private void списокИзображенийToolStripMenuItem_Click(object sender, EventArgs e)
+        private void ImagesListToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DirectoryContentListView.View = View.LargeIcon;
         }
 
-        private void плиткиToolStripMenuItem_Click(object sender, EventArgs e)
+        private void TileToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DirectoryContentListView.View = View.Tile;
-            DirectoryContentListView.Items.Clear();
-            FileInfo f = new FileInfo(CurrentListViewAdress);
-            string t = "";
-            string[] str2 = Directory.GetDirectories(CurrentListViewAdress);
-            ListViewItem lw = new ListViewItem();
-            foreach (string s2 in str2)
-            {
-                f = new FileInfo(@s2);
-                t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                lw = new ListViewItem(new string[] { t }, 0);
-                lw.Name = s2;
-                DirectoryContentListView.Items.Add(lw);
-            }
-            str2 = Directory.GetFiles(CurrentListViewAdress);
-            foreach (string s2 in str2)
-            {
-                f = new FileInfo(@s2);
-                t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                lw = new ListViewItem(new string[] { t }, 1);
-                lw.Name = s2;
-                DirectoryContentListView.Items.Add(lw);
-            }
         }
 
-        private void списокToolStripMenuItem_Click(object sender, EventArgs e)
+        private void SimpleListToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DirectoryContentListView.View = View.List;
         }
 
-        private void таблицаToolStripMenuItem_Click(object sender, EventArgs e)
+        private void DetailsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             DirectoryContentListView.View = View.Details;
-            DirectoryContentListView.Items.Clear();
-            FileInfo f = new FileInfo(CurrentListViewAdress);
-            string t = "";
-            string[] str2 = Directory.GetDirectories(CurrentListViewAdress);
-            ListViewItem lw = new ListViewItem();
-            foreach (string s2 in str2)
-            {
-                f = new FileInfo(@s2);
-                string type = "Папка";
-                t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                lw.Name = s2;
-                DirectoryContentListView.Items.Add(lw);
-            }
-            str2 = Directory.GetFiles(CurrentListViewAdress);
-            foreach (string s2 in str2)
-            {
-                f = new FileInfo(@s2);
-                string type = "Файл";
-                t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                lw.Name = s2;
-                DirectoryContentListView.Items.Add(lw);
-            }
         }
 
-        private void listView1_MouseDoubleClick(object sender, MouseEventArgs e)
+        private void DirectoryContentListView_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            ListView currentListView = (ListView)sender;
-            //обработка двойного нажатия по папке или файлу в ListView
-            if (currentListView.SelectedItems[0].ImageIndex == 0/*listView1.SelectedItems[0].SubItems[2].Text.Equals("Папка")*/)
+            if (DirectoryContentListView.SelectedItems[0].ImageIndex == 0)
             {
-                //обработка нажатия на папку
-                VisitedAdresses.Add(((ListView)sender).SelectedItems[0].Name);
-                CurrentAdressIndex++;
-                CurrentListViewAdress = VisitedAdresses[CurrentAdressIndex];
-                if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
-                    toolStripButton2.Enabled = false;
-                else
-                    toolStripButton2.Enabled = true;
-                if (CurrentAdressIndex - 1 == -1)
-                    toolStripButton1.Enabled = false;
-                else
-                    toolStripButton1.Enabled = true;
-                CurrentListViewAdress = currentListView.SelectedItems[0].Name;
-                toolStripTextBox1.Text = CurrentListViewAdress;
-                FileInfo f = new FileInfo(@currentListView.SelectedItems[0].Name);
-                string t = "";
-                string[] str2 = Directory.GetDirectories(@currentListView.SelectedItems[0].Name);
-                string[] str3 = Directory.GetFiles(@currentListView.SelectedItems[0].Name);
-                currentListView.Items.Clear();
-                ListViewItem lw = new ListViewItem();
-                if (currentListView.View == View.Details)
+                // Folder opening
+                if (CurrentAdressIndex < VisitedAdresses.Count - 1)
                 {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Папка";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Файл";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
+                    VisitedAdresses = VisitedAdresses.Take(CurrentAdressIndex + 1).ToList();
                 }
-                else
+                VisitedAdresses.Add(DirectoryContentListView.SelectedItems[0].Name);
+                CurrentListViewAdress = VisitedAdresses[++CurrentAdressIndex];
+                toolStripForwardButton.Enabled = false;
+                toolStripBackButton.Enabled = true;
+                toolStripAdressTextBox.Text = CurrentListViewAdress;
+                DirectoryContentListView.Items.Clear();
+                try
                 {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
+                    FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
+                }
+                catch (IOException)
+                {
+                    // Ignore unaccessible directories
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Skip not available directories
                 }
             }
             else
             {
-                //обработка нажатия на файл(его запуска)
-                System.Diagnostics.Process MyProc = new System.Diagnostics.Process();
-                MyProc.StartInfo.FileName = @currentListView.SelectedItems[0].Name;
-                MyProc.Start();
+                // File execution
+                Execute(DirectoryContentListView.SelectedItems[0].Name);
             }
         }
 
         private void ClickOnColumn(object sender, ColumnClickEventArgs e)
         {
             ListView currentListView = (ListView)sender;
-            //обработка нажатия на колонку имя(изменение порядка сортировки)
-            if (e.Column == 0)
-            {
-                if (currentListView.Sorting == SortOrder.Descending)
-                    currentListView.Sorting = SortOrder.Ascending;
-                else
-                    currentListView.Sorting = SortOrder.Descending;
-            }
+            currentListView.ListViewItemSorter = GetColumnComparer(e.Column, OrderSigns[e.Column]);
+            OrderSigns[e.Column] = !OrderSigns[e.Column];
         }
 
-        private void UpdateToolStripMenuItem_Click(object sender, EventArgs e)
+        private void UpdateDirectoryContentListView()
         {
-             DirectoryContentListView.Refresh();
-            //listView2.Refresh();
+            DirectoryContentListView.Items.Clear();
+            try
+            {
+                FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
+            }
+            catch (IOException)
+            {
+                // Ignore unaccessible directories
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip not available directories
+            }
+            //DirectoryContentListView.Refresh();
         }
 
         private void CloseToolStripMenuItem_Click(object sender, EventArgs e)
@@ -307,308 +164,313 @@ namespace FileManager
             Application.Exit();
         }
 
-        private void TreeView1_BeforeExpand(object sender, TreeViewCancelEventArgs e)
+        private void FileCatalogTreeView_BeforeExpand(object sender, TreeViewCancelEventArgs e)
         {
-            int i = 0;
-            //заполнение дочерних узлов дочерними узлами развёртываемого узла
+            UpdateNodesContent(e.Node);
+        }
+
+        private void ToolStripBackButton_Click(object sender, EventArgs e)
+        {
+            CurrentAdressIndex--;
+            CurrentListViewAdress = VisitedAdresses[CurrentAdressIndex];
+            toolStripForwardButton.Enabled = true;
+            if (CurrentAdressIndex == 0)
+            {
+                toolStripBackButton.Enabled = false;
+            }
+            toolStripAdressTextBox.Text = CurrentListViewAdress;
+            DirectoryContentListView.Items.Clear();
             try
             {
-                foreach (TreeNode tn in e.Node.Nodes)
-                {
-                    string[] str2 = Directory.GetDirectories(@tn.Name);
-                    foreach (string str in str2)
-                    {
-                        TreeNode temp = new TreeNode();
-                        temp.Name = str;
-                        temp.Text = str.Substring(str.LastIndexOf('\\') + 1);
-                        e.Node.Nodes[i].Nodes.Add(temp);
-                    }
-                    i++;
-                }
+                FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
             }
-            catch (Exception er) {
-                int a = 2 + 2;
-            }
-        }
-
-        private void ToolStripButton1_Click(object sender, EventArgs e)
-        {
-            ListView currentListView = (ListView)sender;
-            //обработка "Назад"
-            if (CurrentAdressIndex - 1 != -1)
+            catch (IOException)
             {
-                CurrentAdressIndex--;
-                CurrentListViewAdress = ((string)VisitedAdresses[CurrentAdressIndex]);
-                if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
-                    toolStripButton2.Enabled = false;
-                else
-                    toolStripButton2.Enabled = true;
-                if (CurrentAdressIndex - 1 == -1)
-                    toolStripButton1.Enabled = false;
-                else
-                    toolStripButton1.Enabled = true;
-                toolStripTextBox1.Text = CurrentListViewAdress;
-                FileInfo f = new FileInfo(CurrentListViewAdress);
-                string t = "";
-                string[] str2 = Directory.GetDirectories(CurrentListViewAdress);
-                string[] str3 = Directory.GetFiles(CurrentListViewAdress);
-                currentListView.Items.Clear();
-                ListViewItem lw = new ListViewItem();
-                if (currentListView.View == View.Details)
-                {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Папка";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Файл";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                }
-                else
-                {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                }
+                // Ignore unaccessible directories
             }
-        }
-
-        private void ToolStripButton2_Click(object sender, EventArgs e)
-        {
-            ListView currentListView = (ListView)sender;
-            //обработка "Вперёд"
-            if (CurrentAdressIndex + 1 != VisitedAdresses.Count)
+            catch (UnauthorizedAccessException)
             {
-                CurrentAdressIndex++;
-                CurrentListViewAdress = ((string)VisitedAdresses[CurrentAdressIndex]);
-                if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
-                    toolStripButton2.Enabled = false;
-                else
-                    toolStripButton2.Enabled = true;
-                if (CurrentAdressIndex - 1 == -1)
-                    toolStripButton1.Enabled = false;
-                else
-                    toolStripButton1.Enabled = true;
-                toolStripTextBox1.Text = CurrentListViewAdress;
-                FileInfo f = new FileInfo(CurrentListViewAdress);
-                string t = "";
-                string[] str2 = Directory.GetDirectories(CurrentListViewAdress);
-                string[] str3 = Directory.GetFiles(CurrentListViewAdress);
-                currentListView.Items.Clear();
-                ListViewItem lw = new ListViewItem();
-                if (currentListView.View == View.Details)
-                {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Папка";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        string type = "Файл";
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                }
-                else
-                {
-                    foreach (string s2 in str2)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 0);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                    foreach (string s2 in str3)
-                    {
-                        f = new FileInfo(@s2);
-                        t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                        lw = new ListViewItem(new string[] { t }, 1);
-                        lw.Name = s2;
-                        currentListView.Items.Add(lw);
-                    }
-                }
+                // Skip not available directories
             }
         }
 
-        private void ToolStripTextBox1_KeyDown(object sender, KeyEventArgs e)
+        private void ToolStripForwardButton_Click(object sender, EventArgs e)
         {
-            ListView currentListView = (ListView)sender;
-            //проверка на то что был нажат enter, если был нажат enter и введённый адресс синтаксически верен, то будет произведён переход
+            CurrentAdressIndex++;
+            CurrentListViewAdress = VisitedAdresses[CurrentAdressIndex];
+            if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
+            {
+                toolStripForwardButton.Enabled = false;
+            }
+            toolStripBackButton.Enabled = true;
+            toolStripAdressTextBox.Text = CurrentListViewAdress;
+            DirectoryContentListView.Items.Clear();
+            try
+            {
+                FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
+            }
+            catch (IOException)
+            {
+                // Ignore unaccessible directories
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip not available directories
+            }
+        }
+
+        private void ToolStripAdressTextBox_KeyDown(object sender, KeyEventArgs e)
+        {
             if (e.KeyValue == 13)
             {
                 try
                 {
-                    string[] str2 = Directory.GetDirectories(@toolStripTextBox1.Text);
-                    string[] str3 = Directory.GetFiles(@toolStripTextBox1.Text);
-                    CurrentAdressIndex++;
-                    CurrentListViewAdress = toolStripTextBox1.Text;
-                    VisitedAdresses.Add(toolStripTextBox1.Text);
-                    if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
-                        toolStripButton2.Enabled = false;
-                    else
-                        toolStripButton2.Enabled = true;
-                    if (CurrentAdressIndex - 1 == -1)
-                        toolStripButton1.Enabled = false;
-                    else
-                        toolStripButton1.Enabled = true;
-                    FileInfo f = new FileInfo(@toolStripTextBox1.Text);
-                    string t = "";
-                    currentListView.Items.Clear();
-                    ListViewItem lw = new ListViewItem();
-                    if (currentListView.View == View.Details)
+                    DirectoryContentListView.Items.Clear();
+                    FillListViewDirectory(DirectoryContentListView, toolStripAdressTextBox.Text);
+                    if (CurrentAdressIndex < VisitedAdresses.Count - 1)
                     {
-                        foreach (string s2 in str2)
-                        {
-                            f = new FileInfo(@s2);
-                            string type = "Папка";
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                        foreach (string s2 in str3)
-                        {
-                            f = new FileInfo(@s2);
-                            string type = "Файл";
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
+                        VisitedAdresses = VisitedAdresses.Take(CurrentAdressIndex + 1).ToList();
                     }
-                    else
-                    {
-                        foreach (string s2 in str2)
-                        {
-                            f = new FileInfo(@s2);
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t }, 0);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                        foreach (string s2 in str3)
-                        {
-                            f = new FileInfo(@s2);
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t }, 1);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                    }
+                    VisitedAdresses.Add(toolStripAdressTextBox.Text);
+                    CurrentListViewAdress = VisitedAdresses[++CurrentAdressIndex];
+                    toolStripForwardButton.Enabled = false;
+                    toolStripBackButton.Enabled = true;
                 }
-                catch
+                catch (IOException)
                 {
-                    toolStripTextBox1.Text = CurrentListViewAdress;
+                    // Ignore unaccessible directories (go back)
+                    toolStripAdressTextBox.Text = CurrentListViewAdress;
+                    FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Skip not available directories (go back)
+                    toolStripAdressTextBox.Text = CurrentListViewAdress;
+                    FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
                 }
             }
         }
 
-        private void ToolStripButton3_Click(object sender, EventArgs e)
+        private void ToolStripUpButton_Click(object sender, EventArgs e)
         {
-            ListView currentListView = (ListView)sender;
-            //обработка "Вверх"
-            int lio = toolStripTextBox1.Text.LastIndexOf('\\');
-            if (lio != -1)
+            int lastSlashIndex = toolStripAdressTextBox.Text.LastIndexOf('\\');
+            if (lastSlashIndex != toolStripAdressTextBox.Text.Length - 1)
             {
-                toolStripTextBox1.Text = toolStripTextBox1.Text.Substring(0, lio);
+                int firstSlashIndex = toolStripAdressTextBox.Text.IndexOf('\\');
+                if (lastSlashIndex == firstSlashIndex)
+                {
+                    toolStripAdressTextBox.Text = toolStripAdressTextBox.Text.Substring(0, lastSlashIndex + 1);
+                }
+                else
+                {
+                    toolStripAdressTextBox.Text = toolStripAdressTextBox.Text.Substring(0, lastSlashIndex);
+                }
                 try
                 {
-                    string[] str2 = Directory.GetDirectories(@toolStripTextBox1.Text + "\\");
-                    string[] str3 = Directory.GetFiles(@toolStripTextBox1.Text + "\\");
-                    CurrentAdressIndex--;
-                    CurrentListViewAdress = toolStripTextBox1.Text;
-                    if (CurrentAdressIndex + 1 == VisitedAdresses.Count)
-                        toolStripButton2.Enabled = false;
-                    else
-                        toolStripButton2.Enabled = true;
-                    if (CurrentAdressIndex - 1 == -1)
-                        toolStripButton1.Enabled = false;
-                    else
-                        toolStripButton1.Enabled = true;
-                    FileInfo f = new FileInfo(@toolStripTextBox1.Text + "\\");
-                    string t = "";
-                    currentListView.Items.Clear();
-                    ListViewItem lw = new ListViewItem();
-                    if (currentListView.View == View.Details)
+                    DirectoryContentListView.Items.Clear();
+                    FillListViewDirectory(DirectoryContentListView, toolStripAdressTextBox.Text);
+                    if (CurrentAdressIndex < VisitedAdresses.Count - 1)
                     {
-                        foreach (string s2 in str2)
-                        {
-                            f = new FileInfo(@s2);
-                            string type = "Папка";
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t, "", type, f.LastWriteTime.ToString() }, 0);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                        foreach (string s2 in str3)
-                        {
-                            f = new FileInfo(@s2);
-                            string type = "Файл";
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t, f.Length.ToString() + " байт", type, f.LastWriteTime.ToString() }, 1);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
+                        VisitedAdresses = VisitedAdresses.Take(CurrentAdressIndex + 1).ToList();
                     }
-                    else
-                    {
-                        foreach (string s2 in str2)
-                        {
-                            f = new FileInfo(@s2);
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t }, 0);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                        foreach (string s2 in str3)
-                        {
-                            f = new FileInfo(@s2);
-                            t = s2.Substring(s2.LastIndexOf('\\') + 1);
-                            lw = new ListViewItem(new string[] { t }, 1);
-                            lw.Name = s2;
-                            currentListView.Items.Add(lw);
-                        }
-                    }
+                    VisitedAdresses.Add(toolStripAdressTextBox.Text);
+                    CurrentListViewAdress = VisitedAdresses[++CurrentAdressIndex];
+                    toolStripForwardButton.Enabled = false;
+                    toolStripBackButton.Enabled = true;
                 }
-                catch
+                catch (IOException)
                 {
-                    toolStripTextBox1.Text = CurrentListViewAdress;
+                    // Ignore unaccessible directories (go back)
+                    toolStripAdressTextBox.Text = CurrentListViewAdress;
+                    FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Skip not available directories (go back)
+                    toolStripAdressTextBox.Text = CurrentListViewAdress;
+                    FillListViewDirectory(DirectoryContentListView, CurrentListViewAdress);
                 }
             }
         }
 
+        private void CopyToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            IsCutting = false;
+            FileBuffer.Clear();
+            FolderBuffer.Clear();
+            foreach (ListViewItem item in DirectoryContentListView.SelectedItems)
+            {
+                if (item.ImageIndex == 0)
+                {
+                    FolderBuffer.Add(item.Name);
+                }
+                else if (item.ImageIndex == 1)
+                {
+                    FileBuffer.Add(item.Name);
+                }
+            }
+        }
+
+        private void PasteToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            foreach (String folderName in FolderBuffer)
+            {
+                if (IsCutting)
+                {
+                    MoveFolder(folderName, CurrentListViewAdress);
+                }
+                else
+                {
+                    CopyFolder(folderName, CurrentListViewAdress);
+                }
+            }
+            foreach (String fileName in FileBuffer)
+            {
+                if (IsCutting)
+                {
+                    MoveFile(fileName, CurrentListViewAdress);
+                }
+                else
+                {
+                    CopyFile(fileName, CurrentListViewAdress);
+                }
+            }
+            UpdateDirectoryContentListView();
+        }
+
+        private void CutToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            IsCutting = true;
+            FileBuffer.Clear();
+            FolderBuffer.Clear();
+            foreach (ListViewItem item in DirectoryContentListView.SelectedItems)
+            {
+                if (item.ImageIndex == 0)
+                {
+                    FolderBuffer.Add(item.Name);
+                }
+                else if (item.ImageIndex == 1)
+                {
+                    FileBuffer.Add(item.Name);
+                }
+            }
+        }
+
+        private void DeleteToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            foreach (ListViewItem item in DirectoryContentListView.SelectedItems)
+            {
+                if (item.ImageIndex == 0)
+                {
+                    DeleteFolder(item.Name);
+                }
+                else if (item.ImageIndex == 1)
+                {
+                    DeleteFile(item.Name);
+                }
+            }
+            UpdateDirectoryContentListView();
+        }
+
+        private void RenameToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (DirectoryContentListView.SelectedItems.Count == 0)
+            {
+                return;
+            }
+            String newName = DirectoryContentListView.SelectedItems[0].Text;
+            if (MainForm.InputBox("Переименование", "Новое имя:", ref newName) == DialogResult.OK)
+            {
+                if (DirectoryContentListView.SelectedItems[0].ImageIndex == 0)
+                {
+                    RenameFolder(DirectoryContentListView.SelectedItems[0].Name, newName);
+                }
+                else if (DirectoryContentListView.SelectedItems[0].ImageIndex == 1)
+                {
+                    RenameFile(DirectoryContentListView.SelectedItems[0].Name, newName);
+                }
+            }
+            UpdateDirectoryContentListView();
+        }
+
+        private void CreateFileToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            String newName = "Новый файл.txt";
+            if (MainForm.InputBox("Создание файла", "Имя нового файла:", ref newName) == DialogResult.OK)
+            {
+                CreateFile(newName, CurrentListViewAdress);
+            }
+            UpdateDirectoryContentListView();
+        }
+
+        private void CreateFolderToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            String newName = "Новая папка";
+            if (MainForm.InputBox("Создание папки", "Имя новой папки:", ref newName) == DialogResult.OK)
+            {
+                CreateFolder(newName, CurrentListViewAdress);
+            }
+            UpdateDirectoryContentListView();
+        }
+
+        public static DialogResult InputBox(string title, string promptText, ref String value)
+        {
+            Form form = new Form();
+            Label label = new Label();
+            TextBox textBox = new TextBox();
+            Button buttonOk = new Button();
+            Button buttonCancel = new Button();
+
+            form.Text = title;
+            label.Text = promptText;
+            textBox.Text = value;
+
+            buttonOk.Text = "OK";
+            buttonCancel.Text = "Cancel";
+            buttonOk.DialogResult = DialogResult.OK;
+            buttonCancel.DialogResult = DialogResult.Cancel;
+
+            label.SetBounds(9, 20, 372, 13);
+            textBox.SetBounds(12, 36, 372, 20);
+            buttonOk.SetBounds(228, 72, 75, 23);
+            buttonCancel.SetBounds(309, 72, 75, 23);
+
+            label.AutoSize = true;
+            textBox.Anchor = textBox.Anchor | AnchorStyles.Right;
+            buttonOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            buttonCancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+            form.ClientSize = new Size(396, 107);
+            form.Controls.AddRange(new Control[] { label, textBox, buttonOk, buttonCancel });
+            form.ClientSize = new Size(Math.Max(300, label.Right + 10), form.ClientSize.Height);
+            form.FormBorderStyle = FormBorderStyle.FixedDialog;
+            form.StartPosition = FormStartPosition.CenterScreen;
+            form.MinimizeBox = false;
+            form.MaximizeBox = false;
+            form.AcceptButton = buttonOk;
+            form.CancelButton = buttonCancel;
+
+            DialogResult dialogResult = form.ShowDialog();
+            value = textBox.Text;
+            return dialogResult;
+        }
+
+        private void OpenToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (DirectoryContentListView.SelectedItems.Count == 0)
+            {
+                return;
+            }
+            if (DirectoryContentListView.SelectedItems[0].ImageIndex == 0)
+            {
+                DirectoryContentListView_MouseDoubleClick(sender, 
+                    new MouseEventArgs(MouseButtons.Right, 2, 0, 0, 0));
+            }
+            else if (DirectoryContentListView.SelectedItems[0].ImageIndex == 1)
+            {
+                TextEditorForm textEditor = new TextEditorForm(DirectoryContentListView.SelectedItems[0].Name);
+                textEditor.Show();
+            }
+        }
     }
 }
